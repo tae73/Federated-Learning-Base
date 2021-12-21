@@ -1,3 +1,7 @@
+from tensorflow import optimizers
+from tensorflow import metrics
+from tensorflow import losses
+
 from utils.save_load import *
 from base.networks import *
 from base.federated import *
@@ -28,11 +32,9 @@ def create_clients(config, num_clients, client_data, input_str, label_str):
 
 
 if __name__=="__main__":
-    from tensorflow import optimizers
-    from tensorflow import metrics
-    from tensorflow import losses
 
-    client_full_train, client_full_valid, client_full_test, external_data = load_fl_data('/Users/taehyun/PycharmProjects/FederatedLearningBase/processed_data/physionet2012/')
+    data_dir =
+    client_full_train, client_full_valid, client_full_test, external_data = load_fl_data(data_dir)
 
     for client in client_full_train:
         client_full_train[client]['label'] = tf.keras.utils.to_categorical(client_full_train[client]['label'].values, num_classes=2)
