@@ -1,11 +1,13 @@
 import numpy as np
 
+
 class Aggregator(object):
     def __init__(self):
         pass
 
     def aggregate(self, n_sample, selected_client_n_k_list, selected_client_loss_list, selected_client_weight_list):
         raise NotImplementedError()
+
 
 class FedAvg(Aggregator):
     def __init__(self):
@@ -17,7 +19,7 @@ class FedAvg(Aggregator):
     def aggregate(self, n_sample, selected_client_n_k_list, selected_client_loss_list, selected_client_weight_list):
         scaled_term_list = [n_k_sample / n_sample for n_k_sample in selected_client_n_k_list]
         scaled_losses_list = [loss * scaled_term for loss, scaled_term in
-                            zip(selected_client_loss_list, scaled_term_list)]
+                              zip(selected_client_loss_list, scaled_term_list)]
         scaled_weights_list = []
         for client_weight, scaled_term in zip(selected_client_weight_list, scaled_term_list):
             scaled_weights = [layer_weight * scaled_term for layer_weight in client_weight]
@@ -33,10 +35,8 @@ class FedAvg(Aggregator):
         return weights_average, loss_average
 
 
-
 if __name__ == "__main__":
     from base.client import *
-    import numpy as np
 
     input_data = np.load(
         '/Users/taehyun/PycharmProjects/Federated_Learning_Framework/data/titanic/kaggle/edge_train_input.npy')
@@ -61,10 +61,12 @@ if __name__ == "__main__":
     config['loss_metric'] = metrics.BinaryCrossentropy
     config['evaluate_metric'] = metrics.BinaryAccuracy
 
-    client1 = Client(network_config=config, client_id='client-1', input=input_data, label=input_label)
+    client1 = Client(network_config=config, client_id='1', network_module=MLPNetwork,
+                     input=input_data, label=input_label)
     client1.learn()
     config['learning_rate'] = 0.1
-    client2 = Client(network_config=config, client_id='client-2', input=input_data, label=input_label)
+    client2 = Client(network_config=config, client_id='2', network_module=MLPNetwork,
+                     input=input_data, label=input_label)
     client2.learn()
 
     agg = FedAvg()
@@ -80,6 +82,6 @@ if __name__ == "__main__":
         selected_client_loss_list.append(client.netmodule.metric_dict['loss'][-1])
 
     avg_weight, loss = agg.aggregate(n_sample=n_sample,
-                                                                   selected_client_n_k_list=selected_client_n_k_list,
-                                                                   selected_client_loss_list=selected_client_loss_list,
-                                                                   selected_client_weight_list=selected_client_weight_list)
+                                     selected_client_n_k_list=selected_client_n_k_list,
+                                     selected_client_loss_list=selected_client_loss_list,
+                                     selected_client_weight_list=selected_client_weight_list)
