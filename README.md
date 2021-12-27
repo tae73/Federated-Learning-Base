@@ -3,7 +3,7 @@
 This code is an implementation of Federated Learning (see. https://ai.googleblog.com/2017/04/federated-learning-collaborative.html)
 with Tensorflow 2.x.
 
-**Note that, This implementation is not an official**
+**Note that, this implementation is not an official**
 
 # Reference
 
