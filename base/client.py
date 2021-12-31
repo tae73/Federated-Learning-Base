@@ -13,7 +13,7 @@ class Client(object):
     """
     def __init__(self, network_config, client_id, network_module, input, label):
         self.client_id: int = client_id
-        self.netmodule: Network = network_module(network_config)
+        self.client_net: Network = network_module(network_config)
         self.input: np.ndarray = input
         self.label: np.ndarray = label
 
@@ -21,8 +21,8 @@ class Client(object):
         self.init_network()
 
     def init_network(self):
-        self.netmodule.create_network()
-        self.netmodule.network._name = f'client-{self.client_id}_network'
+        self.client_net.create_network()
+        self.client_net.network._name = f'client-{self.client_id}_network'
 
     def send_weights(self):
         pass  # not implemented, statement for client - server communication
@@ -31,13 +31,14 @@ class Client(object):
         return  # not implemented, statement for client - server communication
 
     def set_global_weights(self, global_weights):
-        self.netmodule.network.set_weights(global_weights)
+        self.client_net.network.set_weights(global_weights)
 
     def learn(self, verbose=0):
-        self.netmodule.build_with_tape(self.input, self.label, verbose=verbose)
+        self.client_net.build_with_tape(self.input, self.label, verbose=verbose)
 
 
-def create_clients(config, num_clients, client_data, input_str, label_str, network_module):
+def create_clients(config, num_clients, client_data, network_module,
+                   input_str='input', label_str='label', client_str='client-'):
     """
     create K clients
     :param config: network_config
@@ -51,6 +52,6 @@ def create_clients(config, num_clients, client_data, input_str, label_str, netwo
     for i in range(num_clients):
         client_id = i+1
         client = Client(config, client_id, network_module,
-                        client_data[f'client_{client_id}'][input_str], client_data[f'client_{client_id}'][label_str])
+                        client_data[f'client-{client_id}'][input_str], client_data[f'client-{client_id}'][label_str])
         clients.append(client)
     return clients

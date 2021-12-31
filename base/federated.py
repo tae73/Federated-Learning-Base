@@ -49,9 +49,10 @@ if __name__ == "__main__":
     config['input_size'] = 4
     config['n_layers'] = 5
     config['n_hidden_units'] = 10
-    config['num_outputs'] = 2
+    config['num_classes'] = 2
     config['loss_function'] = losses.BinaryCrossentropy
     config['random_seed'] = 42
+    config['pool_pad'] = True
     # train param
     config['learning_rate'] = 0.001
     config['batch_size'] = 1
@@ -78,8 +79,8 @@ if __name__ == "__main__":
     selected_client_loss_list = []
     for client in selected_clients:
         selected_client_n_k_list.append(client.n_k_sample)
-        selected_client_weight_list.append(client.netmodule.network.get_weights())
-        selected_client_loss_list.append(client.netmodule.metric_dict['loss'][-1])
+        selected_client_weight_list.append(client.client_net.network.get_weights())
+        selected_client_loss_list.append(client.client_net.metric_dict['loss'][-1])
 
     avg_weight, loss = agg.aggregate(n_sample=n_sample,
                                      selected_client_n_k_list=selected_client_n_k_list,
