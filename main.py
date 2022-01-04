@@ -1,5 +1,5 @@
-from base.networks import *
-from base.federated import *
+from base.network import *
+from base.aggregate import *
 from base.client import *
 from base.server import *
 from utils.save_load import *
@@ -42,64 +42,78 @@ def exp_physionet():
     network_config['n_layers'] = 5
     network_config['n_hidden_units'] = 10
     network_config['num_classes'] = 2
-    network_config['loss_function'] = losses.BinaryCrossentropy
     network_config['random_seed'] = 42
     # train param
-    network_config['learning_rate'] = 0.0001
-    network_config['batch_size'] = 64
-    network_config['epochs'] = 10
-    network_config['buffer_size'] = 500
-    network_config['optimizer_function'] = optimizers.Adam
-    network_config['loss_metric'] = metrics.BinaryCrossentropy
-    network_config['evaluate_metric'] = metrics.BinaryAccuracy
+    train_config = {}
+    train_config['learning_rate'] = 0.001
+    train_config['batch_size'] = 100
+    train_config['epochs'] = 20
+    train_config['buffer_size'] = 500
+    train_config['random_seed'] = 42
+    train_config['loss_fn'] = losses.BinaryCrossentropy
+    train_config['optimize_fn'] = optimizers.Adam
+    train_config['loss_metric'] = metrics.BinaryCrossentropy
+    train_config['evaluate_metric'] = metrics.BinaryAccuracy
     # server config
-    server_config = {}
-    server_config['num_rounds'] = 50
-    server_config['c_fraction'] = 1
-    server_config['num_clients'] = 4
+    federate_config = {}
+    federate_config['num_rounds'] = 40
+    federate_config['c_fraction'] = 1
+    federate_config['num_clients'] = 4
+    federate_config['loss_metric'] = metrics.BinaryCrossentropy
+    federate_config['evaluate_metric'] = metrics.BinaryAccuracy
 
     clients = create_clients(network_config, 4, client_full_train, input_str='input_train', label_str='label',
-                             network_module=MLPNetwork)
-    central_server = Server(network_config, server_config, network_module=MLPNetwork, aggregator=FedAvg)
+                             client_str='client_')
+    central_server = Server(network_config, train_config, federate_config,
+                            MLPNetwork, BaseNetworkLearn, BaseFederatedLearn, FedAvg)
+
     central_server.learn(clients, valid_data=[external_data['input_full'], external_data['label']])
 
 def exp_mnist():
+
+    (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
+    train_input, test_input = train_images / 255.0, test_images / 255.0
+    train_input = train_input.reshape(-1, 28, 28, 1)
+    test_input = test_input.reshape(-1, 28, 28, 1)
+    train_label = tf.keras.utils.to_categorical(train_labels)
+    test_label = tf.keras.utils.to_categorical(test_labels)
+
     network_config = {}
     # network param
     network_config['task'] = "classification"
     network_config['input_shape'] = (28, 28, 1)
     network_config['num_classes'] = 10
-    network_config['l2_decay'] = 0.001
-    network_config['loss_function'] = losses.CategoricalCrossentropy
+    network_config['l2_decay'] = .0
     network_config['random_seed'] = 42
     network_config['pool_pad'] = True
     # train param
-    network_config['learning_rate'] = 0.001
-    network_config['batch_size'] = 256
-    network_config['epochs'] = 10
-    network_config['buffer_size'] = 1000
-    network_config['optimizer_function'] = optimizers.Adam
-    network_config['loss_metric'] = metrics.CategoricalCrossentropy
-    network_config['evaluate_metric'] = metrics.CategoricalAccuracy
+    train_config = {}
+    train_config['learning_rate'] = 0.001
+    train_config['batch_size'] = 256
+    train_config['epochs'] = 10
+    train_config['buffer_size'] = 1000
+    train_config['random_seed'] = 42
+    train_config['loss_fn'] = losses.CategoricalCrossentropy
+    train_config['optimize_fn'] = optimizers.Adam
+    train_config['loss_metric'] = metrics.CategoricalCrossentropy
+    train_config['evaluate_metric'] = metrics.CategoricalAccuracy
     # server config
-    server_config = {}
-    server_config['num_rounds'] = 50
-    server_config['c_fraction'] = 0.7
-    server_config['num_clients'] = 10
+    federate_config = {}
+    federate_config['num_rounds'] = 20
+    federate_config['c_fraction'] = 0.6
+    federate_config['num_clients'] = 100
+    federate_config['loss_metric'] = metrics.CategoricalCrossentropy
+    federate_config['evaluate_metric'] = metrics.CategoricalAccuracy
+    federate_config['predict_batch_size'] = 10000
 
-    (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
-    train_input, test_input = train_images / 255.0, test_images / 255.0
-    train_input = train_input.reshape(-1, 28, 28, 1)[:10000]
-    test_input = test_input.reshape(-1, 28, 28, 1)
-    train_label = tf.keras.utils.to_categorical(train_labels)[:10000]
-    test_label = tf.keras.utils.to_categorical(test_labels)
+    client_data = create_base_client_data(federate_config['num_clients']
+                                          , train_input, train_label)
 
-    client_data = create_base_client_data(10, train_input, train_label)
-
-    clients = create_clients(network_config, 10, client_data, input_str='input', label_str='label',
-                             network_module=ResNet9)
-    central_server = Server(network_config, server_config, network_module=ResNet9, aggregator=FedAvg)
-    central_server.learn(clients, valid_data=[test_input[:500], test_label[:500]])
+    clients = create_clients(network_config, federate_config['num_clients']
+                             , client_data, input_str='input', label_str='label')
+    central_server = Server(network_config, train_config, federate_config,
+                            ResNet9, BaseNetworkLearn, BaseFederatedLearn, FedAvg)
+    central_server.learn(clients, valid_data=[test_input, test_label])
 
 if __name__=="__main__":
     exp_mnist()

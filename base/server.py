@@ -1,29 +1,36 @@
 from typing import List, Dict
+from copy import deepcopy
 import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras import models, layers, optimizers, initializers, losses, metrics
 from tqdm import tqdm
-from base.networks import *
+from base.learn import *
+from base.network import *
 from base.client import *
-from base.federated import *
+from base.aggregate import *
 
 
 class Server(object):
-    def __init__(self, network_config, server_config, network_module, aggregator):
+    def __init__(self, network_config, network_train_config, federate_config,
+                 network_module, network_learn_module, federated_module, aggregate_fn):
         """
         class for server
 
         """
-        self.num_rounds = server_config['num_rounds']
-        self.c_fraction = server_config['c_fraction']
-        self.num_clients = server_config['num_clients']
+        self.num_rounds = federate_config['num_rounds']
+        self.c_fraction = federate_config['c_fraction']
+        self.num_clients = federate_config['num_clients']
+        self.network_config = network_config
+        self.network_train_config = network_train_config
+
+        self.network_module = network_module
+        self.network_learn_module = network_learn_module
 
         self.selected_clients_index = None
-        self.global_net: Network = network_module(network_config)
+        self.global_net: Network = None
+        self.init_global_network(network_config, network_train_config)
 
-        self.init_global_network()
-
-        self.aggmodule: Aggregator = aggregator()
+        self.federated_module: FederatedLearningProcedure = federated_module(self, aggregate_fn, federate_config)
 
         # results during a round
         self.selected_client_n_k_list: List = None
@@ -33,117 +40,15 @@ class Server(object):
         # results for train
         self.federated_loss_per_round: List = None
         self.train_loss_per_round: List = None
-        self.train_eval_metric_per_round: List = None  # acc , rmse, auc ..
+        self.train_eval_per_round: List = None  # acc , rmse, auc ..
         self.valid_loss_per_round: List = None
         self.valid_eval_metric_per_round: List = None  # acc , rmse, auc ..
 
     def learn(self, clients: List[Client], valid_data: List = None):
-        self.federated_loss_per_round = []
-        self.train_loss_per_round = []
-        self.train_eval_metric_per_round = []
-        if valid_data is not None:
-            self.valid_loss_per_round = []
-            self.valid_eval_metric_per_round = []
+        self.federated_module.learn(clients, valid_data)
 
-        # send initialized global weights to all clients and set client's weights
-        self.send_global_weights()
-        for client in clients: # parallel
-            client.receive_global_weights()
-            client.set_global_weights(self.global_net.network.get_weights())
-        # start learning round / client parally do
-        for round in range(self.num_rounds):
-            print("==========" * 5, f"Round {round + 1}")
-            self.train_one_round(clients)
-            # Valid
-            if valid_data is not None:
-                self.valid_one_round(valid_data)
-                print(f"Federated loss: {np.round(self.federated_loss_per_round[-1], 4)}, "
-                      f"Train loss: {np.round(self.train_loss_per_round[-1], 4)}, "
-                      f"Train {self.global_net.evaluate_metric().name}: "
-                      f"{np.round(self.train_eval_metric_per_round[-1], 4)}, \n"
-                      f"Valid loss: {np.round(self.valid_loss_per_round[-1], 4)}, "
-                      f"Valid {self.global_net.evaluate_metric().name}: "
-                      f"{np.round(self.valid_eval_metric_per_round[-1], 4)}, "
-                      )
-            else:
-                print(f"Federated loss: {np.round(self.federated_loss_per_round[-1], 4)}, "
-                      f"Train loss: {np.round(self.train_loss_per_round[-1], 4)}, "
-                      f"Train {self.global_net.evaluate_metric().name}: "
-                      f"{np.round(self.train_eval_metric_per_round[-1], 4)},"
-                      )
-        # send and receive final global weights
-        self.send_global_weights()
-        for client in clients:
-            client.receive_global_weights()
-            client.set_global_weights(self.global_net.network.get_weights())
-
-    def train_one_round(self, clients: List[Client]):  # server
-        """
-        train one round of learning procedure
-        clients learn its local parameter and sever aggregates the weights of selected clients
-
-        :param clients:
-        :return:
-        """
-        # select clients
-        selected_clients = self.select_clients(clients)  # 이 때는 client 객체 필요 없음.
-
-        n_sample = sum(client.n_k_sample for client in selected_clients)  # total n
-
-        # clients update parallel
-        self.clients_update_one_round(selected_clients)
-        self.receive_weights()
-        # aggregate clients weights
-        federated_weights, federated_loss = self.aggmodule.aggregate(
-            n_sample=n_sample,
-            selected_client_n_k_list=self.selected_client_n_k_list,
-            selected_client_loss_list=self.selected_client_loss_list,
-            selected_client_weight_list=self.selected_client_weight_list
-        )
-        self.set_global_weights(federated_weights)  # set global weights as server weights
-        self.federated_loss_per_round.append(federated_loss)
-        # train eval for all client's input
-        predictions = self.global_net.network(np.concatenate([client.input for client in selected_clients], axis=0))
-        labels = np.concatenate([client.label for client in selected_clients], axis=0)
-        # train loss
-        train_loss = (tf.reduce_sum(self.global_net.loss_metric()(labels, predictions))).numpy()
-        self.train_loss_per_round.append(train_loss)
-        # train eval metric
-        train_eval_metric = (tf.reduce_sum(self.global_net.evaluate_metric()(labels, predictions))).numpy()
-        self.train_eval_metric_per_round.append(train_eval_metric)
-
-    def valid_one_round(self, valid_data: List):
-        """
-
-        :param valid_data: List(input_valid, label_valid)
-        :return:
-        """
-        # valid eval for external validation dataset
-        predictions = self.global_net.network(valid_data[0])
-        labels = valid_data[1]
-        # valid loss
-        valid_loss = (tf.reduce_sum(self.global_net.loss_metric()(labels, predictions))).numpy()
-        self.valid_loss_per_round.append(valid_loss)
-        # train eval metric
-        valid_eval_metric = (tf.reduce_sum(self.global_net.evaluate_metric()(labels, predictions))).numpy()
-        self.valid_eval_metric_per_round.append(valid_eval_metric)
-
-    def clients_update_one_round(self, selected_clients: List[Client]):  # clients
-        self.selected_client_n_k_list = []
-        self.selected_client_weight_list = []
-        self.selected_client_loss_list = []
-        for client in tqdm(selected_clients, desc='clients update'):  # parallel
-            client.receive_global_weights()  # receive weights from server
-            client.set_global_weights(self.global_net.network.get_weights())  # set global weights
-            client.learn()  # client learn
-            # send client information to server (weights, loss, n_k_sample)
-            client.send_weights()
-            self.selected_client_n_k_list.append(client.n_k_sample)
-            self.selected_client_weight_list.append(client.client_net.network.get_weights())
-            self.selected_client_loss_list.append(client.client_net.results['loss'][-1])  # TODO acc 추가?
-
-    def init_global_network(self):
-        self.global_net.create_network()
+    def init_global_network(self, network_config, train_config):
+        self.global_net = self.network_module(network_config, train_config, self.network_learn_module)
         self.global_net.network._name = 'server_network'
 
     def select_clients(self, clients):
@@ -167,3 +72,31 @@ class Server(object):
         :return:
         """
         pass  # not implemented, statement for client - server communication
+
+if __name__ == "__main__":
+    server_config = {}
+    network_config = {}
+    train_config = {}
+    # server param
+    server_config['num_rounds'] = 10
+    server_config['c_fraction'] = 0.7
+    server_config['num_clients'] = 10
+    # network param
+    network_config['task'] = "classification"
+    network_config['input_shape'] = (28, 28, 1)
+    network_config['num_classes'] = 10
+    network_config['l2_decay'] = 0.001
+    network_config['pool_pad'] = True
+    network_config['random_seed'] = 42
+    # train param
+    train_config['random_seed'] = 42
+    train_config['learning_rate'] = 0.01
+    train_config['batch_size'] = 512
+    train_config['epochs'] = 20
+    train_config['buffer_size'] = 1000
+    train_config['loss_function'] = losses.CategoricalCrossentropy
+    train_config['optimizer_function'] = optimizers.Adam
+    train_config['loss_metric'] = metrics.CategoricalCrossentropy
+    train_config['evaluate_metric'] = metrics.CategoricalAccuracy
+
+    server = Server(network_config, train_config, server_config, ResNet9, BaseNetworkLearn, BaseFederatedLearn, FedAvg)
