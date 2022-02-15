@@ -1,40 +1,44 @@
-from typing import List, Dict
+import sys
+sys.path.append('../FederatedLearningBase')
+from omegaconf import DictConfig
 import tensorflow as tf
-import tensorflow.keras as keras
 from tensorflow.keras import models, layers, optimizers, initializers, losses, metrics, regularizers
 from base.learn import NetworkLearningProcedure, BaseNetworkLearn
 
 class Network(object):
-    def __init__(self, network_config, train_config, learn_module):
+    def __init__(self, config: DictConfig, learn_module: BaseNetworkLearn):
         """
         Network class that creates and trains the tensorflow 2.x model and manages its parameters
         """
-        self.network: models.Model = None
+        self.model: models.Model = None
         self.learn_module: BaseNetworkLearn = None # TODO rename learn_module
-        self.results:Dict = None
+        self.strategy: tf.distribute.MirroredStrategy = None
         
     def create_network(self):
-        raise NotImplementedError()
+        raise NotImplementedError
     
     def learn(self):
-        self.learn_module.learn()
+        raise NotImplementedError
         
 class MLPNetwork(Network):
-    def __init__(self, network_config, train_config, learn_module):
-        super().__init__(network_config, train_config, learn_module)
+    def __init__(self, config: DictConfig, learn_module: BaseNetworkLearn, distribute=False):
+        super().__init__(config, learn_module)
         # network param
-        self.task: str = network_config['task']
-        self.input_size: int = network_config['input_size']
-        self.n_layers: int = network_config['n_layers']
-        self.n_hidden_units: int = network_config['n_hidden_units']
-        self.num_classes: int = network_config['num_classes']
-        self.random_seed: int = network_config['random_seed']
-        #Learn module
-        self.network: models.Model
-        self.create_network()
-        self.learn_module = learn_module(self.network, train_config)
-        # result param
-        self.results: Dict = None
+        self.task: str = config.network.task
+        self.input_size: int = config.network.input_size
+        self.n_layers: int = config.network.n_layers
+        self.n_hidden_units: int = config.network.n_hidden_units
+        self.num_classes: int = config.network.num_classes
+        self.random_seed: int = config.random.random_seed
+
+        self.strategy = None
+        if distribute:
+            self.strategy = tf.distribute.MirroredStrategy()
+            with self.strategy.scope():
+                self.model: models.Model = self.create_network()
+        else:
+            self.model: models.Model = self.create_network()
+        self.learn_module = learn_module(self.model, config, self.strategy)
 
     def create_network(self):
         """
@@ -49,39 +53,41 @@ class MLPNetwork(Network):
             dense = layers.Dense(
                 units=self.n_hidden_units,
                 kernel_initializer=initializers.glorot_uniform(seed=self.random_seed),
+                bias_initializer='zeros',
                 activation='relu',
                 name='intermediate_dense_{}'.format(i + 1)
             )(dense)
 
         output_layer = layers.Dense(self.num_classes,
                                     kernel_initializer=initializers.glorot_uniform(seed=self.random_seed),
+                                    bias_initializer='zeros',
                                     activation="linear" if self.task == 'regression' else 'softmax',
                                     name="regressor" if self.task == 'regression' else 'classifier')(dense)
-        self.network = models.Model(input_layer, output_layer)
-        return self.network
+        self.model = models.Model(input_layer, output_layer)
+        return self.model
 
     def learn(self, inputs, labels, valid_data, verbose=True):
         self.learn_module.learn(inputs, labels, valid_data, verbose=verbose)
 
 class ResNet9(Network):
-    def __init__(self, network_config, train_config, learn_module=BaseNetworkLearn):
-        """
-        Network class that creates and trains the tensorflow 2.x model and manages its parameters
-        """
-        super().__init__(network_config, train_config, learn_module)
+    def __init__(self, config: DictConfig, learn_module: BaseNetworkLearn=BaseNetworkLearn, distribute=False):
+        super().__init__(config, learn_module)
         # network param
-        self.task: str = network_config['task']
-        self.input_shape: int = network_config['input_shape']
-        self.num_classes: int = network_config['num_classes']
-        self.random_seed: int = network_config['random_seed']
-        self.l2_decay: float = network_config['l2_decay']
-        self.pool_pad: bool = network_config['pool_pad']
+        self.input_shape: int = eval(config.network.input_shape)
+        self.num_classes: int = config.network.num_classes
+        self.random_seed: int = config.random.random_seed
+        self.l2_decay: float = config.network.l2_decay
+        self.pool_pad: bool = config.network.pool_pad
         # Learn module
-        self.network: models.Model
-        self.create_network()
-        self.learn_module = learn_module(self.network, train_config,)
-        # result param
-        self.results: Dict = None
+
+        self.strategy = None
+        if distribute:
+            self.strategy = tf.distribute.MirroredStrategy()
+            with self.strategy.scope():
+                self.model: models.Model = self.create_network()
+        else:
+            self.model: models.Model = self.create_network()
+        self.learn_module = learn_module(self.model, config, self.strategy)
 
     def create_network(self):
         def conv_block(in_channels, out_channels, pool=False, pool_no=2, pool_pad=self.pool_pad):
@@ -105,77 +111,27 @@ class ResNet9(Network):
         out = models.Sequential([conv_block(512, 512), conv_block(512, 512)])(out) + out
         out = models.Sequential([layers.MaxPooling2D(pool_size=4), layers.Flatten(),
                                  layers.Dense(self.num_classes, use_bias=False, activation='softmax')])(out)
-        self.network = models.Model(inputs=inputs, outputs=out)
+        self.model = models.Model(inputs=inputs, outputs=out)
+        return self.model
 
     def learn(self, inputs, labels, valid_data, verbose=True):
         self.learn_module.learn(inputs, labels, valid_data, verbose=verbose)
 
 if __name__ == "__main__":
+    # disable tensorflow debugging
+    from utils import gpu_utils
+    gpu_utils.disable_tensorflow_debugging_logs()
 
-    def test_mlpnet():
-        import numpy as np
+    from omegaconf import OmegaConf
+    config = OmegaConf.load('./config/cnn_config.yaml')
 
-        input_train = np.load(
-            '/home/taehyun/project/Vertical-Cloud-Edge-Learning/data/titanic/kaggle/edge_train_input.npy')
-        label_train = np.load(
-            '/home/taehyun/project/Vertical-Cloud-Edge-Learning/data/titanic/kaggle/label_train.npy')
+    (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
+    train_inputs, test_inputs = train_images / 255.0, test_images / 255.0
+    train_inputs = train_inputs.reshape(-1, 28, 28, 1)
+    test_inputs = test_inputs.reshape(-1, 28, 28, 1)
+    train_labels = tf.keras.utils.to_categorical(train_labels)
+    test_labels = tf.keras.utils.to_categorical(test_labels)
 
-        network_config = {}
-        train_config = {}
-        # network param
-        network_config['task'] = "classification"
-        network_config['input_size'] = 4
-        network_config['n_layers'] = 5
-        network_config['n_hidden_units'] = 10
-        network_config['num_classes'] = 2
-        network_config['random_seed'] = 42
-        # train param
-        train_config['learning_rate'] = 0.001
-        train_config['batch_size'] = 56
-        train_config['epochs'] = 64
-        train_config['buffer_size'] = 100
-        train_config['random_seed'] = 42
-        train_config['loss_function'] = losses.BinaryCrossentropy
-        train_config['optimize_fn'] = optimizers.Adam
-        train_config['loss_metric'] = metrics.BinaryCrossentropy
-        train_config['evaluate_metric'] = metrics.BinaryAccuracy
-
-        mlp = MLPNetwork(network_config, train_config)
-        mlp.learn(input_train, label_train, valid_data=None, verbose=True)
-
-    def test_resnet9():
-        (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
-
-        train_input, test_input = train_images / 255.0, test_images / 255.0
-
-        train_input = train_input.reshape(-1, 28, 28, 1)
-        test_input = test_input.reshape(-1, 28, 28, 1)
-        train_label = tf.keras.utils.to_categorical(train_labels)
-        test_label = tf.keras.utils.to_categorical(test_labels)
-
-        network_config = {}
-        train_config = {}
-        # network param
-        network_config['task'] = "classification"
-        network_config['input_shape'] = (28, 28, 1)
-        network_config['num_classes'] = 10
-        network_config['l2_decay'] = 0.001
-        network_config['pool_pad'] = True
-        network_config['random_seed'] = 42
-        # train param
-        train_config['random_seed'] = 42
-        train_config['learning_rate'] = 0.01
-        train_config['batch_size'] = 512
-        train_config['epochs'] = 20
-        train_config['buffer_size'] = 1000
-        train_config['loss_function'] = losses.CategoricalCrossentropy
-        train_config['optimize_fn'] = optimizers.Adam
-        train_config['loss_metric'] = metrics.CategoricalCrossentropy
-        train_config['evaluate_metric'] = metrics.CategoricalAccuracy
-
-        res = ResNet9(network_config, train_config, BaseNetworkLearn)
-        res.learn(train_input, train_label, [test_input, test_label], verbose=True)
-
-    test_resnet9()
-
+    res = ResNet9(config, BaseNetworkLearn, distribute=False)
+    res.learn(train_inputs, train_labels, [test_inputs, test_labels])
 

@@ -79,8 +79,8 @@ if __name__ == "__main__":
     selected_client_loss_list = []
     for client in selected_clients:
         selected_client_n_k_list.append(client.n_k_sample)
-        selected_client_weight_list.append(client.client_net.network.get_weights())
-        selected_client_loss_list.append(client.client_net.metric_dict['loss'][-1])
+        selected_client_weight_list.append(client.clientnet.model.get_weights())
+        selected_client_loss_list.append(client.clientnet.metric_dict['loss'][-1])
 
     avg_weight, loss = agg.aggregate(n_sample=n_sample,
                                      selected_client_n_k_list=selected_client_n_k_list,

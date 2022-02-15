@@ -1,0 +1,25 @@
+network:
+  task : 'classification'
+  input_size : 40
+  num_classes : 2
+  n_layers : 5
+  n_hidden_units : 10
+
+train:
+  epochs : 20
+  learning_rate : 0.001
+  loss_fn : losses.BinaryCrossentropy
+  optimize_fn : optimizers.Adam
+  loss_metric : metrics.BinaryCrossentropy
+  evaluate_metric : metrics.BinaryAccuracy
+  batch_size : 128
+  buffer_size : 1000
+
+federate:
+  num_rounds : 50
+  c_fraction : 1
+  num_clients : 4
+  predict_batch_size : 20000
+
+random:
+  random_seed : 42

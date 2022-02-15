@@ -1,0 +1,27 @@
+network:
+  task : 'classification'
+  input_shape : (28, 28, 1)
+  num_classes : 10
+  l2_decay : .001
+  pool_pad : True
+
+train:
+  epochs : 10
+  learning_rate : 0.0001
+  loss_fn : losses.CategoricalCrossentropy
+  optimize_fn : optimizers.Adam
+  loss_metric : metrics.CategoricalCrossentropy
+  evaluate_metric : metrics.CategoricalAccuracy
+  batch_size : 1024
+  buffer_size : 2000
+
+federate:
+  num_rounds : 30
+  c_fraction : 0.8
+  num_clients : 20
+
+random:
+  random_seed : 42
+
+
+
